@@ -221,7 +221,7 @@ class HaloModel(Cosmology):
 
         # Update with overrides
         if param_override is not None:
-            print(param_override)
+#            print(param_override)
             for key in param_override.keys():
                 if key=='battaglia_gas_gamma':
                     pparams[key] = param_override[key]
@@ -372,6 +372,22 @@ class HaloModel(Cosmology):
             self.uk_profiles[name] = ukouts.copy()
         
         return self.ks,ukouts
+    
+
+    
+    def add_custom_pressure_profile(self, profile, name):
+        if profile.shape != self.uk_profiles['nfw'].shape:
+            raise DimensionError("Profile doesn't have the correct dimensions")
+        else:
+            self.pk_profiles[name] = profile.copy()
+            
+    def add_custom_profile(self, profile, name):
+        if profile.shape != self.uk_profiles['nfw'].shape:
+            raise DimensionError("Profile doesn't have the correct dimensions")
+        else:
+            self.uk_profiles[name] = profile.copy()
+        
+
 
     def add_hod(self,name,mthresh=None,ngal=None,corr="max",
                 satellite_profile_name='nfw',
@@ -461,10 +477,11 @@ class HaloModel(Cosmology):
                      alphasat=pparams['hod_alphasat'],
                      Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
                      Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
-                     Msat_override=Msat_override,
-                     Mcut_override=Mcut_override)
+                     Msat_override=None,
+                     Mcut_override=None)
         NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
         NcNs = avg_NcNs(Ncs,Nss,corr)
+
         
         self.hods[name]['Nc'] = Ncs
         self.hods[name]['Ns'] = Nss
@@ -475,6 +492,144 @@ class HaloModel(Cosmology):
         self.hods[name]['satellite_profile'] = satellite_profile_name
         self.hods[name]['central_profile'] = central_profile_name
         self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
+        self.hods[name]['parameters'] = pparams
+        self.hods[name]['Ms'] = 10**(Mstellar_halo(self.zs[:,None], log10mhalo))
+        self.hods[name]['Msat'] = hod_default_mfunc(Mhalo_stellar(self.zs[:,None],log10mstellar_thresh), \
+								pparams['hod_Bsat'],pparams['hod_betasat'])
+        self.hods[name]['Mcut'] = hod_default_mfunc(Mhalo_stellar(self.zs[:,None],log10mstellar_thresh), \
+								pparams['hod_Bcut'],pparams['hod_betacut'])
+
+
+    def add_custom_hod(self,name,mthresh=None,ngal=None,corr="max",
+                satellite_profile_name='nfw',
+                central_profile_name=None,ignore_existing=False,param_override=None,
+                Nc_model=None, Ns_model=None, model_params=None, z_dep=True):
+        """
+        Specify an HOD.
+        This requires either a stellar mass threshold mthresh (nz,)
+        or a number density ngal (nz,) from which mthresh is identified iteratively.
+        You can either specify a corr="max" maximally correlated central-satellite 
+        model or a corr="min" minimally correlated model.
+        Miscentering could be included through central_profile_name (default uk=1 for default name of None).
+        """
+        if not(ignore_existing): 
+            assert name not in self.uk_profiles.keys(), \
+                "HOD name already used by profile."
+        assert satellite_profile_name in self.uk_profiles.keys(), \
+            "No matter profile by that name exists."
+        if central_profile_name is not None:
+            assert central_profile_name in self.uk_profiles.keys(), \
+                "No matter profile by that name exists."
+        if not(ignore_existing): 
+            assert name not in self.hods.keys(), "HOD with that name already exists."
+
+        hod_params = ['hod_sig_log_mstellar','hod_bisection_search_min_log10mthresh',
+                   'hod_bisection_search_max_log10mthresh','hod_bisection_search_rtol',
+                   'hod_bisection_search_warn_iter','hod_alphasat','hod_Bsat',
+                      'hod_betasat','hod_Bcut','hod_betacut','hod_A_log10mthresh']
+        # Set default parameters
+        pparams = {}
+        for ip in hod_params:
+            pparams[ip] = self.p[ip]
+
+        # Update with overrides
+        if param_override is not None:
+            for key in param_override.keys():
+                if key in hod_params:
+                    pparams[key] = param_override[key]
+                else:
+                    raise ValueError # param in param_override doesn't seem to be an HOD parameter
+        
+        
+        self.hods[name] = {}
+        if ngal is not None:
+            try: assert ngal.size == self.zs.size
+            except:
+                raise ValueError("ngal has to be a vector of size self.zs")
+            assert mthresh is None
+
+            try:
+                Msat_override = pparams['hod_Msat_override']
+            except:
+                Msat_override = None
+            try:
+                Mcut_override = pparams['hod_Mcut_override']
+            except:
+                Mcut_override = None
+
+            nfunc = lambda ilog10mthresh: ngal_from_mthresh(ilog10mthresh,
+                                                            self.zs,
+                                                            self.nzm,
+                                                            self.ms,
+                                                            sig_log_mstellar=pparams['hod_sig_log_mstellar'],
+                                                            alphasat=pparams['hod_alphasat'],
+                                                            Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
+                                                            Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                                                            Msat_override=Msat_override,
+                                                            Mcut_override=Mcut_override)
+
+            log10mthresh = utils.vectorized_bisection_search(ngal,nfunc,
+                                                             [pparams['hod_bisection_search_min_log10mthresh'],
+                                                              pparams['hod_bisection_search_max_log10mthresh']],
+                                                             "decreasing",
+                                                             rtol=pparams['hod_bisection_search_rtol'],
+                                                             verbose=True,
+                                                             hang_check_num_iter=pparams['hod_bisection_search_warn_iter'])
+            mthresh = 10**(log10mthresh*pparams['hod_A_log10mthresh'])
+            
+        try: assert mthresh.size == self.zs.size
+        except:
+            raise ValueError("mthresh has to be a vector of size self.zs")
+
+        log10mhalo = np.log10(self.ms[None,:])
+        log10mstellar_thresh = np.log10(mthresh[:,None])
+        Ms = 10**(Mstellar_halo(self.zs[:,None], log10mhalo))
+
+
+        if Nc_model is not None:
+            Ncs = Nc_model(log10mhalo, model_params)
+        else:
+            Ncs = avg_Nc(log10mhalo,self.zs[:,None],log10mstellar_thresh,sig_log_mstellar=pparams['hod_sig_log_mstellar'])
+
+
+        if Ns_model is not None:
+            Nss = Ns_model(log10mhalo, Ncs, model_params)
+        else:
+            Nss = avg_Ns(log10mhalo,self.zs[:,None],log10mstellar_thresh,Nc=Ncs,
+                         sig_log_mstellar=pparams['hod_sig_log_mstellar'],
+                         alphasat=pparams['hod_alphasat'],
+                         Bsat=pparams['hod_Bsat'],betasat=pparams['hod_betasat'],
+                         Bcut=pparams['hod_Bcut'],betacut=pparams['hod_betacut'],
+                         Msat_override=None,
+                         Mcut_override=None)
+        
+        if z_dep is False:
+            Ncs = np.array([Ncs[0]]*len(self.zs))
+            Nss = np.array([Nss[0]]*len(self.zs))
+        else:
+            pass
+
+        NsNsm1 = avg_NsNsm1(Ncs,Nss,corr)
+        NcNs = avg_NcNs(Ncs,Nss,corr)
+
+        
+        self.hods[name]['Nc'] = Ncs
+        self.hods[name]['Ns'] = Nss
+        self.hods[name]['NsNsm1'] = NsNsm1
+        self.hods[name]['NcNs'] = NcNs
+        self.hods[name]['ngal'] = self.get_ngal(Ncs,Nss)
+        self.hods[name]['bg'] = self.get_bg(Ncs,Nss,self.hods[name]['ngal'])
+        self.hods[name]['satellite_profile'] = satellite_profile_name
+        self.hods[name]['central_profile'] = central_profile_name
+        self.hods[name]['log10mthresh'] = np.log10(mthresh[:,None])
+        self.hods[name]['parameters'] = pparams
+        self.hods[name]['Ms'] = Ms
+        self.hods[name]['Msat'] = hod_default_mfunc(Mhalo_stellar(self.zs[:,None],log10mstellar_thresh), \
+								pparams['hod_Bsat'],pparams['hod_betasat'])
+        self.hods[name]['Mcut'] = hod_default_mfunc(Mhalo_stellar(self.zs[:,None],log10mstellar_thresh), \
+								pparams['hod_Bcut'],pparams['hod_betacut'])
+
+
         
     def get_ngal(self,Nc,Ns): return ngal_from_mthresh(nzm=self.nzm,ms=self.ms,Ncs=Nc,Nss=Ns)
 
@@ -507,9 +662,20 @@ class HaloModel(Cosmology):
         uk = self.uk_profiles[name]
         if lowklim: uk = 1
         return ms*uk/self.rho_matter_z(0)
+    
+    def _get_matter_custom(self, profile, lowklim=False): # get matter for input profile
+        ms = self.ms[...,None]
+        uk = profile
+        if lowklim: uk = 1
+        return ms*uk/self.rho_matter_z(0)
 
     def _get_pressure(self,name,lowklim=False):
         pk = self.pk_profiles[name].copy()
+        if lowklim: pk[:,:,:] = pk[:,:,0][...,None] 
+        return pk
+    
+    def _get_pressure_custom(self, profile, lowklim=False): # get pressure profile for input profile
+        pk = profile.copy()
         if lowklim: pk[:,:,:] = pk[:,:,0][...,None]
         return pk
 
@@ -517,6 +683,9 @@ class HaloModel(Cosmology):
     def get_power(self,name,name2=None,verbose=True,b1=None,b2=None):
         if name2 is None: name2 = name
         return self.get_power_1halo(name,name2) + self.get_power_2halo(name,name2,verbose,b1,b2)
+    
+    def get_power_custom(self,profile1, profiletype1, profile2, profiletype2, verbose=True,b1=None,b2=None):
+        return self.get_power_1halo_custom(profile1,profiletype1, profile2,profiletype2) + self.get_power_2halo_custom(profile1,profiletype1, profile2,profiletype2,verbose,b1,b2)
     
     def get_power_1halo(self,name="nfw",name2=None):
         name2 = name if name2 is None else name2
@@ -542,6 +711,23 @@ class HaloModel(Cosmology):
         integrand = self.nzm[...,None] * square_term
         return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
     
+    def get_power_1halo_custom(self, profile1, profiletype1, profile2, profiletype2):  # Get 1halo power term from input profiles
+        ms = self.ms[...,None]
+        square_term=1.
+        profiles = [profile1, profile2]
+        profiletypes = [profiletype1, profiletype2]
+        for i in [0, 1]:
+            if profiletypes[i] == 'matter':
+                square_term *= self._get_matter_custom(profiles[i])
+            elif profiletypes[i] == 'pressure':
+                square_term *= self._get_pressure_custom(profiles[i])
+            # elif profiletypes[i]=='hod':
+            #     square_term *= get_hod_alt(profiles[i])
+            else: raise ValueError
+        
+        integrand = self.nzm[...,None] * square_term
+        return np.trapz(integrand,ms,axis=-2)*(1-np.exp(-(self.ks/self.p['kstar_damping'])**2.))
+    
     def get_power_2halo(self,name="nfw",name2=None,verbose=False,b1_in=None,b2_in=None):
         name2 = name if name2 is None else name2
         
@@ -558,7 +744,7 @@ class HaloModel(Cosmology):
             elif iname in self.pk_profiles.keys():
                 rterm1 = self._get_pressure(iname)
                 rterm01 = self._get_pressure(iname,lowklim=True)
-                print ('Check the consistency relation for tSZ')
+                # print ('Check the consistency relation for tSZ')
                 b = rterm01 =0
             elif iname in self.hods.keys():
                 rterm1 = self._get_hod(iname)
@@ -572,6 +758,50 @@ class HaloModel(Cosmology):
 
         iterm1,iterm01,b1 = _get_term(name)
         iterm2,iterm02,b2 = _get_term(name2)
+        if b1_in is not None:
+            b1 = b1_in.reshape((b1_in.shape[0],1))
+        if b2_in is not None:
+            b2 = b2_in.reshape((b1_in.shape[0],1))
+
+        integral = _2haloint(iterm1)
+        integral2 = _2haloint(iterm2)
+            
+        # consistency relation : Correct for part that's missing from low-mass halos to get P(k->0) = b1*b2*Plinear
+        consistency1 = _2haloint(iterm01)
+        consistency2 = _2haloint(iterm02)
+        if verbose:
+            print("Two-halo consistency1: " , consistency1,integral)
+            print("Two-halo consistency2: " , consistency2,integral2)
+        return self.Pzk * (integral+b1-consistency1)*(integral2+b2-consistency2)
+    
+    def get_power_2halo_custom(self, profile1, profiletype1, profile2, profiletype2,verbose=False,b1_in=None,b2_in=None):  # get 2halo power term from input profiles   
+        def _2haloint(iterm):
+            integrand = self.nzm[...,None] * iterm * self.bh[...,None]
+            integral = np.trapz(integrand,ms,axis=-2)
+            return integral
+
+        def _get_term(profile, profiletype):
+            if profiletype == 'matter':
+                rterm1 = self._get_matter_custom(profile)
+                rterm01 = self._get_matter_custom(profile,lowklim=True)
+                b = 1
+            elif profiletype == 'pressure':
+                rterm1 = self._get_pressure_custom(profile)
+                rterm01 = self._get_pressure_custom(profile,lowklim=True)
+                print ('Check the consistency relation for tSZ')
+                b = rterm01 =0
+#             elif profiletype == 'hod':
+#                 rterm1 = get_hod_alt(profile)
+#                 rterm01 = get_hod_alt(profile,lowklim=True)
+#                 b = self.get_bg(self.hods[iname]['Nc'],self.hods[iname]['Ns'],self.hods[iname]['ngal'])[:,None]
+            else: raise ValueError
+            return rterm1,rterm01,b
+            
+        ms = self.ms[...,None]
+
+
+        iterm1,iterm01,b1 = _get_term(profile1, profiletype1)
+        iterm2,iterm02,b2 = _get_term(profile2, profiletype2)
         if b1_in is not None:
             b1 = b1_in.reshape((b1_in.shape[0],1))
         if b2_in is not None:

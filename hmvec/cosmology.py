@@ -5,6 +5,8 @@ import camb
 from camb import model
 import scipy.interpolate as si
 import scipy.constants as constants
+import astropy.constants as c
+import astropy.units as u
 
 """
 This module will (eventually) abstract away the choice of boltzmann codes.
@@ -316,6 +318,15 @@ class Cosmology(object):
             Wz1s = 1.
             Wz2s = 1./dchi/hzs
         return limber_integral(ells,zs,ks,Pgg,gzs,Wz1s,Wz2s,hzs,chis)
+    
+    def C_gg_new(self,ells,zs,ks,Pgg,gzs,gdndz=None,zmin=None,zmax=None):
+        gzs = np.asarray(gzs)
+        chis = self.comoving_radial_distance(gzs)
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        nznorm = np.trapz(gdndz,gzs)
+        Wz1s = gdndz/nznorm
+        Wz2s = gdndz/nznorm
+        return limber_integral(ells,zs,ks,Pgg,gzs,Wz1s,Wz2s,hzs,chis)
 
     def C_kk(self,ells,zs,ks,Pmm,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None,lwindow2=None):
         if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
@@ -323,6 +334,7 @@ class Cosmology(object):
         chis = self.comoving_radial_distance(zs)
         hzs = self.h_of_z(zs) # 1/Mpc
         return limber_integral(ells,zs,ks,Pmm,zs,lwindow1,lwindow2,hzs,chis)
+    
 
     def C_gy(self,ells,zs,ks,Pgp,gzs,gdndz=None,zmin=None,zmax=None):
         gzs = np.asarray(gzs)
@@ -337,7 +349,18 @@ class Cosmology(object):
             Wz1s = 1.
             Wz2s = 1./dchi/hzs
 
-        return limber_integral(ells,zs,ks,Ppy,gzs,1,Wz2s,hzs,chis)
+        return limber_integral(ells,zs,ks,Pgp,gzs,1,Wz2s,hzs,chis)
+    
+    def C_gy_new(self,ells,zs,ks,Pgp,gzs,gdndz=None,zmin=None,zmax=None):
+        gzs = np.asarray(gzs)
+        chis = self.comoving_radial_distance(gzs)
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        nznorm = np.trapz(gdndz,gzs)
+        term = (c.sigma_T/(c.m_e*c.c**2)).to(u.s**2/u.M_sun)*u.M_sun/u.s**2
+        Wz1s = gdndz/nznorm
+        Wz2s = 1/(1+gzs)
+
+        return limber_integral(ells,zs,ks,Pgp,gzs,Wz1s,Wz2s,hzs,chis)
 
     def C_ky(self,ells,zs,ks,Pym,lzs1=None,ldndz1=None,lzs2=None,ldndz2=None,lwindow1=None):
         if lwindow1 is None: lwindow1 = self.lensing_window(zs,lzs1,ldndz1)
@@ -352,6 +375,17 @@ class Cosmology(object):
         # 
 
         return limber_integral(ells,zs,ks,Ppp,zs,1,1,hzs,chis)
+    
+    def C_yy_new(self,ells,zs,ks,Ppp,gzs,dndz=None,zmin=None,zmax=None):
+        chis = self.comoving_radial_distance(gzs)
+        hzs = self.h_of_z(gzs) # 1/Mpc
+        Wz1s = 1/(1+gzs)
+        Wz2s = 1/(1+gzs)
+        # Convert to y units
+        # 
+
+        return limber_integral(ells,zs,ks,Ppp,gzs,Wz1s,Wz2s,hzs,chis)
+    
 
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']
