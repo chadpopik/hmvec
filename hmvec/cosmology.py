@@ -386,6 +386,20 @@ class Cosmology(object):
 
         return limber_integral(ells,zs,ks,Ppp,gzs,Wz1s,Wz2s,hzs,chis)
     
+#     def Cl_White2022(self, ells, zs, ks, P_XY, W_X, W_Y):
+#         Omm = (hcos.params['omch2']+hcos.params['ombh2'])/(hcos.params['H0']/100)**2
+#         chis = self.comoving_radial_distance(gzs)
+        
+#         def W_u(z):
+#             gpart = self.comoving_radial_distance(z)*(self.comoving_radial_distance(zint) - self.comoving_radial_distance(z))/self.comoving_radial_distance(zint)
+#             integrated = np.trapz(gpart*, zint)
+#             (5*s_mu -2) * (3/2) * Omm * hcos.params['H0']**2 * (1+z)
+            
+        def W_g(z, W_u):
+            return self.h_of_z(z*ngnorm)
+        chis = self.comoving_radial_distance(gzs)
+        
+    
 
     def total_matter_power_spectrum(self,Pnn,Pne,Pee):
         omtoth2 = self.p['omch2'] + self.p['ombh2']
@@ -443,3 +457,43 @@ def limber_integral(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
         else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
     return Cells
     
+
+def limber_integral2(ells,zs,ks,Pzks,gzs,Wz1s,Wz2s,hzs,chis):
+    """
+    Get C(ell) = \int dz (H(z)/c) W1(z) W2(z) Pzks(z,k=ell/chi) / chis**2.
+    ells: (nells,) multipoles looped over
+    zs: redshifts (npzs,) corresponding to Pzks
+    ks: comoving wavenumbers (nks,) corresponding to Pzks
+    Pzks: (npzs,nks) power specrum
+    gzs: (nzs,) corersponding to Wz1s, W2zs, Hzs and chis
+    Wz1s: weight function (nzs,)
+    Wz2s: weight function (nzs,)
+    hzs: Hubble parameter (nzs,) in *1/Mpc* (e.g. camb.results.h_of_z(z))
+    chis: comoving distances (nzs,)
+
+    We interpolate P(z,k)
+    """
+
+    hzs = np.array(hzs).reshape(-1)
+    Wz1s = np.array(Wz1s).reshape(-1)
+    Wz2s = np.array(Wz2s).reshape(-1)
+    chis = np.array(chis).reshape(-1)
+    
+    prefactor = hzs * Wz1s * Wz2s   / chis**2.
+    zevals = gzs
+    if zs.size>1:            
+         f = interp2d(ks,zs,Pzks,bounds_error=True)     
+    else:      
+         f = interp1d(ks,Pzks[0],bounds_error=True)
+    Cells = np.zeros(ells.shape)
+    for i,ell in enumerate(ells):
+        kevals = (ell+0.5)/chis
+        if zs.size>1:
+            # hack suggested in https://stackoverflow.com/questions/47087109/evaluate-the-output-from-scipy-2d-interpolation-along-a-curve
+            # to get around scipy.interpolate limitations
+            interpolated = si.dfitpack.bispeu(f.tck[0], f.tck[1], f.tck[2], f.tck[3], f.tck[4], kevals, zevals)[0]
+        else:
+            interpolated = f(kevals)
+        if zevals.size==1: Cells[i] = interpolated * prefactor
+        else: Cells[i] = np.trapz(interpolated*prefactor,zevals)
+    return Cells

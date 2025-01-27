@@ -62,6 +62,7 @@ def f_nu(nu,zs,delta=200.,norm_consistency=True,
     unnormalized = (1. + (beta*nu)**(-2.*phi))*(nu**(2*eta))*np.exp(-gamma*nu**2./2.)
     if norm_consistency:
         aroot = os.path.dirname(__file__)+"/../data/alpha_consistency.txt"
+        aroot = "/global/homes/c/cpopik/Packages/hmvec/examples/data/alpha_consistency.txt"  # Note from Chad: Not a great fix, sorry if i forgot to change
         izs,ialphas = np.loadtxt(aroot,unpack=True) # FIXME: hardcoded
         alpha = interp1d(izs,ialphas,bounds_error=True)(zs)
     return alpha * unnormalized 
